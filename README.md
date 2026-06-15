@@ -39,7 +39,7 @@ The **Model Context Protocol (MCP)**, open-sourced by Anthropic, acts as an open
 ```mermaid
 graph TD
     %% Without MCP
-    subgraph Without MCP (N x M Complexity)
+    subgraph "Without MCP (N x M Complexity)"
         App1[Claude Desktop] -->|Custom Code| API1[(Jira API)]
         App1 -->|Custom Code| API2[(GitHub API)]
         App2[Cursor] -->|Custom Code| API1
@@ -47,7 +47,7 @@ graph TD
     end
 
     %% With MCP
-    subgraph With MCP (Unified Standard)
+    subgraph "With MCP (Unified Standard)"
         HostA[Claude Desktop] --> MCP_Client[MCP Client]
         HostB[Cursor] --> MCP_Client
         MCP_Client -->|Standard Protocol| Server1[Jira MCP Server]
