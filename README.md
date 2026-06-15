@@ -316,143 +316,147 @@ Because MCP servers execute local code and access data, they represent a signifi
 
 ## 8. Step-by-Step Implementation Guides & Code Explanations
 
-Here we break down two working examples using **stdio** and **SSE** transport layers.
+This section breaks down the **actual code** present in this repository, showing how the local calculator server and the Gemini integration client are constructed and work together.
 
 ---
 
-### Example 1: Building a stdio Server & Client
+### The Server (`server.py`)
+Exposes math operations as MCP tools using the standard `stdio` transport.
 
-This is a local, process-to-process architecture.
-
-#### 1. The Server (`server_stdio.py`)
 ```python
 from mcp.server.fastmcp import FastMCP
+from dotenv import load_dotenv
+import os
 
-mcp = FastMCP("MathServer")
+load_dotenv()
+
+api_key = os.getenv("GEMINI_API_KEY")
+
+mcp = FastMCP("Calculator")
 
 @mcp.tool()
-def add_numbers(x: float, y: float) -> float:
-    """
-    Adds two floating point numbers and returns the sum.
-    
-    Args:
-        x: First number
-        y: Second number
-    """
-    return x + y
+def add(a: int, b: int) -> int:
+    """Add two numbers and return their sum."""
+    return a + b
+
+@mcp.tool()
+def subtract(a: int, b: int) -> int:
+    """Subtract the second number from the first and return the result."""
+    return a - b
+
+@mcp.tool()
+def multiply(a: int, b: int) -> int:
+    """Multiply two numbers and return the product."""
+    return a * b
+
+@mcp.tool()
+def divide(a: int, b: int) -> float:
+    """Divide the first number by the second and return the quotient."""
+    if b == 0:
+        raise ValueError("Cannot divide by zero.")
+    return a / b
 
 if __name__ == "__main__":
-    mcp.run(transport="stdio")
+    mcp.run()
 ```
 
 ##### Code Explanation:
-* **`from mcp.server.fastmcp import FastMCP`**: Imports the official high-level FastMCP helper designed to minimize boilerplate.
-* **`mcp = FastMCP("MathServer")`**: Instantiates the server object and names it `"MathServer"`. This name is sent to the client during the protocol handshake.
-* **`@mcp.tool()`**: A decorator that automatically registers the python function below it as an MCP tool. It generates the matching JSON schema dynamically.
-* **Type Hints (`x: float, y: float) -> float`**: FastMCP inspects these type annotations to construct the schema constraints (e.g., specifying that parameter `x` must be a number).
-* **Docstring (`Adds two...`)**: The docstrings and the `Args:` descriptions are parsed and sent to the client. The LLM reads these descriptions to determine which tool is suitable for a task.
-* **`mcp.run(transport="stdio")`**: Tells the server process to start and begin listening on Standard Input (`stdin`) and writing back responses on Standard Output (`stdout`).
+* **`from mcp.server.fastmcp import FastMCP`**: Imports the FastMCP utility framework, which simplifies setting up an MCP server.
+* **`load_dotenv()`**: Loads standard system environment variables from a local `.env` file (like `GEMINI_API_KEY`).
+* **`mcp = FastMCP("Calculator")`**: Creates a FastMCP server named `"Calculator"`.
+* **`@mcp.tool()`**: Registers the python functions (`add`, `subtract`, `multiply`, `divide`) as official tools. This exposes them to any connected client.
+* **Type Hints (`a: int, b: int) -> int`**: FastMCP automatically extracts these type annotations and creates matching JSON schema definitions for the parameters.
+* **Docstrings**: The text explaining each function (e.g. `"Add two numbers and return their sum."`) is sent to the client to describe to the LLM what the tool is used for.
+* **`if b == 0: raise ValueError(...)`**: Standard validation logic. When an exception occurs, MCP will format it into a tool execution failure output and return it to the client.
+* **`mcp.run()`**: By default, running this without arguments defaults to starting the local `stdio` transport, listening for input on standard input.
 
 ---
 
-#### 2. The Client (`client_stdio.py`)
+### The Client & LLM Loop (`client.py`)
+Launches the calculator server as a subprocess, connects to the Gemini model to parse instructions, and calls the tools.
+
 ```python
 import asyncio
+import json
+import os
+import re
+from dotenv import load_dotenv
+from google import genai
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-async def run_client():
-    # Define connection parameters for local execution
+load_dotenv()
+api_key = os.getenv("GEMINI_API_KEY")
+
+class GeminiClient:
+    def __init__(self, api_key):
+        self.api_key = api_key
+        self.client = genai.Client(api_key=api_key)
+
+    def generate_response(self, prompt):
+        prompt = (
+            f"Given the following user input, determine which tool to call and with what parameters. "
+            f"User input: {prompt} "
+            f"Available tools: add, subtract, multiply, divide. "
+            f"Output ONLY a JSON object like this example: "
+            f'{{"tool_name": "multiply", "parameters": {{"a": 6, "b": 7}}}} '
+            f"For input 'add 5 and 3' output: "
+            f'{{"tool_name": "add", "parameters": {{"a": 5, "b": 3}}}} '
+            f"Return only the JSON, no explanation or markdown."
+        )
+        response = self.client.models.generate_content(
+            model="gemini-2.5-flash-lite",
+            contents=prompt
+        )
+        raw = response.text
+        clean = re.sub(r"```(?:json)?\s*|\s*```", "", raw).strip()
+        return json.loads(clean)
+
+async def main():
     server_params = StdioServerParameters(
         command="python",
-        args=["server_stdio.py"]
+        args=["server.py"]
     )
 
     async with stdio_client(server_params) as (read_stream, write_stream):
         async with ClientSession(read_stream, write_stream) as session:
-            # Complete the protocol handshake
             await session.initialize()
-            
-            # List tools
-            tools_response = await session.list_tools()
-            print("Available tools:", [tool.name for tool in tools_response.tools])
-            
-            # Call a tool
-            result = await session.call_tool("add_numbers", {"x": 10.5, "y": 4.5})
-            print("Output of add_numbers(10.5, 4.5):", result.content[0].text)
+
+            tools_result = await session.list_tools()
+            print("Available tools:")
+            for tool in tools_result.tools:
+                print(f"- {tool.name} :: {tool.description}") 
+
+            ai = GeminiClient(api_key)
+
+            while True:
+                user_input = input("Enter a command: ")
+                if user_input.lower() == "exit":
+                    break
+
+                response = ai.generate_response(user_input)
+                print("Gemini response:", response)
+
+                result = await session.call_tool(
+                    name=response["tool_name"],  
+                    arguments=response["parameters"]
+                )
+
+                print(f"{response['tool_name']}({response['parameters']}) = {result.content[0].text}")
 
 if __name__ == "__main__":
-    asyncio.run(run_client())
+    asyncio.run(main())
 ```
 
 ##### Code Explanation:
-* **`StdioServerParameters(...)`**: Configures how to launch the server. It specifies the executable (`python`) and the relative path arguments to the server script (`server_stdio.py`).
-* **`async with stdio_client(server_params)`**: A context manager that launches the server process in the background, exposing native async read and write streams tied to the child process's stdout and stdin.
-* **`ClientSession(read_stream, write_stream)`**: Starts the JSON-RPC session loop over these streams to manage concurrent requests and responses.
-* **`await session.initialize()`**: Executes the mandatory initialization handshake. The client and server agree on protocol versions and exchange capabilities.
-* **`await session.list_tools()`**: Sends a `tools/list` request to discover the tools exposed by the server.
-* **`await session.call_tool("add_numbers", ...)`**: Invokes the `add_numbers` function on the server. The client packs the argument values into a JSON-RPC payload, sends it to the server, and retrieves the text result from `result.content[0].text`.
-
----
-
-### Example 2: Building an SSE Server & Client
-
-This architecture runs the server as a network-accessible HTTP web service.
-
-#### 1. The Server (`server_sse.py`)
-*To run this server, install uvicorn and starlette:* `pip install starlette uvicorn`
-
-```python
-from mcp.server.fastmcp import FastMCP
-
-mcp = FastMCP("SSEServer")
-
-@mcp.tool()
-def get_system_status() -> str:
-    """Check the health status of the remote server."""
-    return "All systems operational (SSE)"
-
-if __name__ == "__main__":
-    # Runs an HTTP web service exposing SSE transport endpoints
-    mcp.run(transport="sse")
-```
-
-##### Code Explanation:
-* **`mcp.run(transport="sse")`**: Instead of listening on stdio, FastMCP spins up an ASGI web application (using FastAPI/Starlette) running on port `8000` by default.
-* The tool definition remains exactly the same. The transport mechanism is decoupled from your business logic.
-
----
-
-#### 2. The Client (`client_sse.py`)
-```python
-import asyncio
-from mcp import ClientSession
-from mcp.client.sse import sse_client
-
-async def run_sse_client():
-    # Connect to the running SSE server endpoint
-    server_url = "http://localhost:8000/sse"
-    
-    async with sse_client(server_url) as (read_stream, write_stream):
-        async with ClientSession(read_stream, write_stream) as session:
-            # Perform protocol handshake
-            await session.initialize()
-            
-            # List tools
-            tools_response = await session.list_tools()
-            print("SSE Server Tools:", [tool.name for tool in tools_response.tools])
-            
-            # Call tool
-            result = await session.call_tool("get_system_status")
-            print("Server response:", result.content[0].text)
-
-if __name__ == "__main__":
-    asyncio.run(run_sse_client())
-```
-
-##### Code Explanation:
-* **`sse_client(server_url)`**: Connects to the HTTP server at the specified `/sse` endpoint. It keeps a persistent GET request open for reading messages (SSE stream) and uses HTTP POST requests under the hood to send messages.
-* **Protocol-Agnostic Code**: Notice how `session.initialize()`, `session.list_tools()`, and `session.call_tool()` are **identical** to the stdio client code. Once the transport streams are established, the application layer does not care whether communication is happening over local OS pipes or the Internet.
+* **`class GeminiClient`**: Wraps the official Google `genai` client using the API key from environment variables.
+* **`generate_response(self, prompt)`**: Prompt-engineers Gemini (`gemini-2.5-flash-lite`) to translate natural language math prompts (like "multiply 12 by 4") into a structured JSON tool selection request (e.g. `{"tool_name": "multiply", "parameters": {"a": 12, "b": 4}}`). We use a regex `re.sub` to clean markdown blocks before parsing with `json.loads`.
+* **`StdioServerParameters(command="python", args=["server.py"])`**: Configures how the client starts the MCP server process (`python server.py`).
+* **`async with stdio_client(server_params) as (read_stream, write_stream)`**: Spawns the server as a child process and maps standard I/O channels to async communication streams.
+* **`async with ClientSession(read_stream, write_stream)`**: Configures and manages the communication protocol session over the active streams.
+* **`await session.initialize()`**: Executes the MCP handshake.
+* **`await session.list_tools()`**: Fetches and lists all active calculator tools from the server.
+* **`await session.call_tool(...)`**: Executes the tool that Gemini selected. It sends a message to the server subprocess containing the function name and parameters, receives the result payload, and displays the return value to the user.
 
 ---
 
@@ -462,7 +466,7 @@ The **MCP Inspector** is a powerful GUI debugging tool provided by the developer
 
 ```bash
 # Debug a local stdio python server
-npx @modelcontextprotocol/inspector python server_stdio.py
+npx @modelcontextprotocol/inspector python server.py
 ```
 
 It launches a local web application (usually at `http://localhost:5173`) where you can interactively test your tools and resources.
