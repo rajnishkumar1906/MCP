@@ -6,23 +6,22 @@ Welcome to the comprehensive developer's guide and complete tutorial for the **M
 
 ## Table of Contents
 1. [Executive Summary & The "Why"](#1-executive-summary--the-why)
-2. [Core Architecture: Host vs. Client vs. Server](#2-core-architecture-host-vs-client-vs-server)
-3. [The Three Pillars of MCP](#3-the-three-pillars-of-mcp)
+2. [Core Glossary & Definitions](#2-core-glossary--definitions)
+3. [Core Architecture: Host vs. Client vs. Server](#3-core-architecture-host-vs-client-vs-server)
+4. [The Three Pillars of MCP](#4-the-three-pillars-of-mcp)
    - [Tools (Actions)](#tools-actions)
    - [Resources (Data Sources)](#resources-data-sources)
    - [Prompts (Templates)](#prompts-templates)
-4. [Deep Dive: Transport Layers (stdio vs. SSE)](#4-deep-dive-transport-layers-stdio-vs-sse)
+5. [Deep Dive: Transport Layers (stdio vs. SSE)](#5-deep-dive-transport-layers-stdio-vs-sse)
    - [stdio Protocol Plumbing](#stdio-protocol-plumbing)
    - [SSE Protocol Plumbing](#sse-protocol-plumbing)
    - [Comparison Matrix](#comparison-matrix)
-5. [Wire Protocol: JSON-RPC 2.0 & Wire Formats](#5-wire-protocol-json-rpc-20--wire-formats)
-6. [Session Lifecycle & Handshake Flow](#6-session-lifecycle--handshake-flow)
-7. [Security & Sandboxing Model](#7-security--sandboxing-model)
-8. [Step-by-Step Implementation Guides](#8-step-by-step-implementation-guides)
-   - [Example 1: Building a stdio Server & Client](#example-1-building-a-stdio-server--client)
-   - [Example 2: Building an SSE Server & Client](#example-2-building-an-sse-server--client)
-9. [Debugging & Testing (MCP Inspector)](#9-debugging--testing-mcp-inspector)
-10. [Best Practices & Design Patterns](#10-best-practices--design-patterns)
+6. [Wire Protocol: JSON-RPC 2.0 & Wire Formats](#6-wire-protocol-json-rpc-20--wire-formats)
+7. [Session Lifecycle & Handshake Flow](#7-session-lifecycle--handshake-flow)
+8. [Security & Sandboxing Model](#8-security--sandboxing-model)
+9. [Step-by-Step Implementation Guides & Code Explanations](#9-step-by-step-implementation-guides--code-explanations)
+10. [Debugging & Testing (MCP Inspector)](#10-debugging--testing-mcp-inspector)
+11. [Best Practices & Design Patterns](#11-best-practices--design-patterns)
 
 ---
 
@@ -61,7 +60,23 @@ By standardizing how capabilities are described and executed, any MCP-compliant 
 
 ---
 
-## 2. Core Architecture: Host vs. Client vs. Server
+## 2. Core Glossary & Definitions
+
+Before looking at the technical architecture, here are the official definitions of the key terms used throughout the Model Context Protocol:
+
+* **Host**: The user-facing container application (e.g. Claude Desktop, Cursor, VS Code) that orchestrates sessions, runs the core LLM execution loop, and displays outputs to the user.
+* **Client**: The internal engine within the Host implementing the MCP specification. It handles connection parameters, manages active server sessions, translates LLM intents into tool calls, and passes responses back to the model.
+* **Server**: A lightweight, standalone process or web service that exposes custom tools, read-only resources, and prompt templates to the client. It is LLM-independent.
+* **Tool**: An executable action exposed by the server (e.g., executing a command or writing a file). Tools have schemas defining parameters and descriptions.
+* **Resource**: Read-only context (such as database schemas, logs, or static configuration files) identified by unique URIs that the server makes accessible to the LLM.
+* **Prompt**: Reusable instruction templates or system configurations that servers declare to guide user queries (similar to slash commands).
+* **Transport Layer**: The serialization and connection plumbing used to send JSON-RPC 2.0 frames between client and server. Standard layers include `stdio` (Standard I/O) and `SSE` (Server-Sent Events).
+* **JSON-RPC 2.0**: The lightweight, stateless remote procedure call protocol encoding format used by MCP.
+* **Handshake (Initialization)**: The startup exchange where the client and server confirm protocol version compatibility and advertise capabilities.
+
+---
+
+## 3. Core Architecture: Host vs. Client vs. Server
 
 MCP divides responsibilities into three distinct roles:
 
@@ -100,7 +115,7 @@ The **Server** is a lightweight, specialized process or service that exposes spe
 
 ---
 
-## 3. The Three Pillars of MCP
+## 4. The Three Pillars of MCP
 
 MCP defines three primary primitives that a server can expose: **Tools**, **Resources**, and **Prompts**.
 
@@ -141,7 +156,7 @@ Prompts are **reusable instructions or templates** that guide the LLM's behavior
 
 ---
 
-## 4. Deep Dive: Transport Layers (stdio vs. SSE)
+## 5. Deep Dive: Transport Layers (stdio vs. SSE)
 
 Transport determines how the serialized JSON-RPC 2.0 messages are physically framed and sent between the Client and Server. MCP supports two core transport modes out of the box.
 
@@ -222,7 +237,7 @@ Unlike standard HTTP (which is request-response only) or WebSockets (which are f
 
 ---
 
-## 5. Wire Protocol: JSON-RPC 2.0 & Wire Formats
+## 6. Wire Protocol: JSON-RPC 2.0 & Wire Formats
 
 All communication over MCP transports conforms to the **JSON-RPC 2.0 specification**.
 
@@ -274,7 +289,7 @@ Used for asynchronous events that do not expect a response.
 
 ---
 
-## 6. Session Lifecycle & Handshake Flow
+## 7. Session Lifecycle & Handshake Flow
 
 Before tools can be executed, the client and server must complete an initialization handshake.
 
@@ -303,7 +318,7 @@ sequenceDiagram
 
 ---
 
-## 7. Security & Sandboxing Model
+## 8. Security & Sandboxing Model
 
 Because MCP servers execute local code and access data, they represent a significant security surface area.
 
@@ -314,7 +329,7 @@ Because MCP servers execute local code and access data, they represent a signifi
 
 ---
 
-## 8. Step-by-Step Implementation Guides & Code Explanations
+## 9. Step-by-Step Implementation Guides & Code Explanations
 
 This section breaks down the **actual code** present in this repository, showing how the local calculator server and the Gemini integration client are constructed and work together.
 
@@ -460,7 +475,7 @@ if __name__ == "__main__":
 
 ---
 
-## 9. Debugging & Testing (MCP Inspector)
+## 10. Debugging & Testing (MCP Inspector)
 
 The **MCP Inspector** is a powerful GUI debugging tool provided by the developers of MCP. It allows you to visualize communication, inspect tool schemas, and invoke methods manually.
 
@@ -473,7 +488,7 @@ It launches a local web application (usually at `http://localhost:5173`) where y
 
 ---
 
-## 10. Best Practices & Design Patterns
+## 11. Best Practices & Design Patterns
 
 1. **Design Narrow APIs**: Do not create generic tools like `run_code()`. Keep tools specific (e.g., `update_database_row()`) so the model makes fewer planning errors.
 2. **Handle Large Payloads Gracefully**: When returning large amounts of data, prefer sending them as **Resources** rather than large tool outputs. LLMs read resources with dedicated intent, optimizing context window usage.
