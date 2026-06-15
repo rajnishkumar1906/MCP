@@ -314,13 +314,17 @@ Because MCP servers execute local code and access data, they represent a signifi
 
 ---
 
-## 8. Step-by-Step Implementation Guides
+## 8. Step-by-Step Implementation Guides & Code Explanations
+
+Here we break down two working examples using **stdio** and **SSE** transport layers.
+
+---
 
 ### Example 1: Building a stdio Server & Client
 
-Here is a full working setup using **stdio** transport.
+This is a local, process-to-process architecture.
 
-#### The Server (`server_stdio.py`)
+#### 1. The Server (`server_stdio.py`)
 ```python
 from mcp.server.fastmcp import FastMCP
 
@@ -341,7 +345,17 @@ if __name__ == "__main__":
     mcp.run(transport="stdio")
 ```
 
-#### The Client (`client_stdio.py`)
+##### Code Explanation:
+* **`from mcp.server.fastmcp import FastMCP`**: Imports the official high-level FastMCP helper designed to minimize boilerplate.
+* **`mcp = FastMCP("MathServer")`**: Instantiates the server object and names it `"MathServer"`. This name is sent to the client during the protocol handshake.
+* **`@mcp.tool()`**: A decorator that automatically registers the python function below it as an MCP tool. It generates the matching JSON schema dynamically.
+* **Type Hints (`x: float, y: float) -> float`**: FastMCP inspects these type annotations to construct the schema constraints (e.g., specifying that parameter `x` must be a number).
+* **Docstring (`Adds two...`)**: The docstrings and the `Args:` descriptions are parsed and sent to the client. The LLM reads these descriptions to determine which tool is suitable for a task.
+* **`mcp.run(transport="stdio")`**: Tells the server process to start and begin listening on Standard Input (`stdin`) and writing back responses on Standard Output (`stdout`).
+
+---
+
+#### 2. The Client (`client_stdio.py`)
 ```python
 import asyncio
 from mcp import ClientSession, StdioServerParameters
@@ -371,14 +385,22 @@ if __name__ == "__main__":
     asyncio.run(run_client())
 ```
 
+##### Code Explanation:
+* **`StdioServerParameters(...)`**: Configures how to launch the server. It specifies the executable (`python`) and the relative path arguments to the server script (`server_stdio.py`).
+* **`async with stdio_client(server_params)`**: A context manager that launches the server process in the background, exposing native async read and write streams tied to the child process's stdout and stdin.
+* **`ClientSession(read_stream, write_stream)`**: Starts the JSON-RPC session loop over these streams to manage concurrent requests and responses.
+* **`await session.initialize()`**: Executes the mandatory initialization handshake. The client and server agree on protocol versions and exchange capabilities.
+* **`await session.list_tools()`**: Sends a `tools/list` request to discover the tools exposed by the server.
+* **`await session.call_tool("add_numbers", ...)`**: Invokes the `add_numbers` function on the server. The client packs the argument values into a JSON-RPC payload, sends it to the server, and retrieves the text result from `result.content[0].text`.
+
 ---
 
 ### Example 2: Building an SSE Server & Client
 
-Here is a complete setup using **SSE** transport.
+This architecture runs the server as a network-accessible HTTP web service.
 
-#### The Server (`server_sse.py`)
-To run this server, make sure you have `starlette` or `fastapi` and `uvicorn` installed (`pip install starlette uvicorn`).
+#### 1. The Server (`server_sse.py`)
+*To run this server, install uvicorn and starlette:* `pip install starlette uvicorn`
 
 ```python
 from mcp.server.fastmcp import FastMCP
@@ -395,7 +417,13 @@ if __name__ == "__main__":
     mcp.run(transport="sse")
 ```
 
-#### The Client (`client_sse.py`)
+##### Code Explanation:
+* **`mcp.run(transport="sse")`**: Instead of listening on stdio, FastMCP spins up an ASGI web application (using FastAPI/Starlette) running on port `8000` by default.
+* The tool definition remains exactly the same. The transport mechanism is decoupled from your business logic.
+
+---
+
+#### 2. The Client (`client_sse.py`)
 ```python
 import asyncio
 from mcp import ClientSession
@@ -421,6 +449,10 @@ async def run_sse_client():
 if __name__ == "__main__":
     asyncio.run(run_sse_client())
 ```
+
+##### Code Explanation:
+* **`sse_client(server_url)`**: Connects to the HTTP server at the specified `/sse` endpoint. It keeps a persistent GET request open for reading messages (SSE stream) and uses HTTP POST requests under the hood to send messages.
+* **Protocol-Agnostic Code**: Notice how `session.initialize()`, `session.list_tools()`, and `session.call_tool()` are **identical** to the stdio client code. Once the transport streams are established, the application layer does not care whether communication is happening over local OS pipes or the Internet.
 
 ---
 
